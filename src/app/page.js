@@ -27,9 +27,10 @@ export default function ScanWajah() {
     async function initSystem() {
       try {
         setStatus('Mengunduh bobot model wajah...');
-        await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-        await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+        // Ubah dari /models menjadi ./models jika masih eror setelah kamera diizinkan
+await faceapi.nets.tinyFaceDetector.loadFromUri('./models');
+await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
+await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
         
         setStatus('Sinkronisasi data wajah karyawan...');
         const { data, error } = await supabase.from('teknisi').select('nik, nama_teknisi, face_embedding');
