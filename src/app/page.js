@@ -1,7 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import * as faceapi from 'face-api.js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -10,82 +9,103 @@ const supabase = createClient(
 
 export default function ScanWajah() {
   const videoRef = useRef(null);
-  const [status, setStatus] = useState('Menginisialisasi kamera & model AI...');
-  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [status, setStatus] = useState('Memuat sistem AI...');
+  const [faceapi, setFaceapi] = useState(null);
   const [labeledDescriptors, setLabeledDescriptors] = useState([]);
 
+  // 1. Load library face-api.js secara dinamis khusus di Client-side
   useEffect(() => {
-    async function loadModelsAndData() {
-      await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-      await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-      await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
-      setModelsLoaded(true);
-      setStatus('Model AI Siap. Mengambil data wajah dari server...');
-      
-      // Ambil data embedding semua teknisi dari Supabase
-      const { data, error } = await supabase.from('teknisi').select('nik, nama_teknisi, face_embedding');
-      if (!error && data) {
-        const formatted = data.filter(t => t.face_embedding).map(t => {
-          const embeddingArray = new Float32Array(JSON.parse(t.face_embedding));
-          return new faceapi.LabeledFaceDescriptors(t.nik, [embeddingArray]);
-        });
-        setLabeledDescriptors(formatted);
-        setStatus('Sistem siap. Silakan posisikan wajah Anda di depan kamera.');
-      }
-      startVideo();
-    }
-    loadModelsAndData();
+    import('face-api.js').then((mod) => {
+      setFaceapi(mod);
+    }).catch(err => setStatus('Gagal memuat modul AI: ' + err.message));
   }, []);
 
-  const startVideo = () => {
-    navigator.mediaDevices.getUserMedia({ video: {} })
-      .then((stream) => { if (videoRef.current) videoRef.current.srcObject = stream; })
-      .catch((err) => console.error("Gagal akses kamera: ", err));
-  };
+  // 2. Jika library sudah siap, load model dari folder public dan data Supabase
+  useEffect(() => {
+    if (!faceapi) return;
+
+    async function initSystem() {
+      try {
+        setStatus('Mengunduh bobot model wajah...');
+        await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+        await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+        
+        setStatus('Sinkronisasi data wajah karyawan...');
+        const { data, error } = await supabase.from('teknisi').select('nik, nama_teknisi, face_embedding');
+        
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          const formatted = data
+            .filter(t => t.face_embedding)
+            .map(t => {
+              const embeddingArray = new Float32Array(JSON.parse(t.face_embedding));
+              return new faceapi.LabeledFaceDescriptors(t.nik, [embeddingArray]);
+            });
+          setLabeledDescriptors(formatted);
+          setStatus('Sistem siap. Silakan posisikan wajah Anda.');
+        } else {
+          setStatus('Sistem siap. (Belum ada data wajah teknisi terdaftar).');
+        }
+
+        // Aktifkan Kamera
+        const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+        if (videoRef.current) videoRef.current.srcObject = stream;
+
+      } catch (err) {
+        console.error(err);
+        setStatus('Eror sistem: Pastikan folder /models/ sudah benar atau izinkan akses kamera.');
+      }
+    }
+
+    initSystem();
+  }, [faceapi]);
 
   const handleAbsen = async () => {
-    if (!modelsLoaded || labeledDescriptors.length === 0) return;
-    setStatus('Memindai wajah...');
+    if (!faceapi || labeledDescriptors.length === 0) {
+      setStatus('Sistem/Data belum siap sepenuhnya.');
+      return;
+    }
+    setStatus('Sedang memindai wajah Anda...');
 
     const detections = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
       .withFaceLandmarks()
       .withFaceDescriptor();
 
     if (!detections) {
-      setStatus('Wajah tidak terdeteksi. Coba lagi.');
+      setStatus('Wajah tidak terdeteksi. Silakan sesuaikan posisi wajah.');
       return;
     }
 
-    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6); // Threshold kemiripan 60%
+    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
     const bestMatch = faceMatcher.findBestMatch(detections.descriptor);
 
     if (bestMatch.label === 'unknown') {
-      setStatus('Wajah Tidak Dikenali! Harap hubungi Admin.');
+      setStatus('Wajah Tidak Dikenali!');
       return;
     }
 
     const nikTerdeteksi = bestMatch.label;
-    setStatus(`Mencocokkan sukses! NIK: ${nikTerdeteksi}. Mencatat ke Google Sheets...`);
+    setStatus(`Wajah cocok! NIK: ${nikTerdeteksi}. Mencatat log absen...`);
 
-    // Ambil data lengkap teknisi
     const { data: teknisi } = await supabase.from('teknisi').select('*').eq('nik', nikTerdeteksi).single();
 
     if (teknisi) {
-      // Tembak data ke Google Apps Script milik Mas Ecky
       try {
-        const response = await fetch(process.env.NEXT_PUBLIC_GAS_URL, {
+        await fetch(process.env.NEXT_PUBLIC_GAS_URL, {
           method: 'POST',
-          mode: 'no-cors', // Atasi CORS issue pada Apps Script
+          mode: 'no-cors',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             nik: teknisi.nik,
             nama_teknisi: teknisi.nama_teknisi,
             unit: teknisi.unit,
             service_area: teknisi.service_area,
-            action: 'absen' // Logika masuk/pulang di-handle di backend/GAS Anda
+            action: 'absen'
           })
         });
-        setStatus(`Absen Berhasil! Terima kasih ${teknisi.nama_teknisi}.`);
+        setStatus(`Absen Berhasil! Terima kasih, ${teknisi.nama_teknisi}.`);
       } catch (err) {
         setStatus('Gagal mengirim data ke Google Sheets.');
       }
@@ -102,7 +122,7 @@ export default function ScanWajah() {
           <video ref={videoRef} autoPlay muted className="w-full h-full object-cover transform -scale-x-100" />
         </div>
 
-        <div className={`p-3 rounded-lg text-sm font-medium mb-6 ${status.includes('Berhasil') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-slate-700/50 text-slate-300'}`}>
+        <div className="p-3 rounded-lg text-sm font-medium mb-6 bg-slate-700/50 text-slate-300">
           {status}
         </div>
 
