@@ -27,9 +27,10 @@ export default function TambahTeknisi() {
 
     async function loadModels() {
       try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-        await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+        const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
         setIsModelLoaded(true);
         setStatus('Sistem Siap. Isi data dan aktifkan kamera untuk mendaftar.');
       } catch (err) {
