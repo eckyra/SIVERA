@@ -23,9 +23,13 @@ export default function TambahTeknisi() {
     e.preventDefault();
     setStatus('Sedang menganalisis wajah...');
 
-    const detection = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-      .withFaceLandmarks()
-      .withFaceRecognition68Descriptor();
+    // Tambahkan parameter inputSize dan scoreThreshold untuk meringankan beban
+const detection = await faceapi.detectSingleFace(
+  videoRef.current, 
+  new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+)
+.withFaceLandmarks()
+.withFaceRecognition68Descriptor();
 
     if (!detection) {
       setStatus('Gagal mendeteksi wajah. Pastikan wajah terlihat jelas di kamera.');
